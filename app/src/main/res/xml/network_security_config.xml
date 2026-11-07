@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No cleartext HTTP anywhere. A pin-mode Orbit Server pairing trusts only its pinned certificate (server/PinnedTls)
+     and never these anchors. A public-certificate pairing (server/PublicCaTls) trusts exactly these: system CAs only,
+     never user-added ones. Do not add user or debug-override anchors here. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

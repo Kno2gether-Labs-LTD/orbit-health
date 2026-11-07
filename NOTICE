@@ -1,0 +1,23 @@
+Orbit Health
+Copyright 2026 Kno2gether Labs LTD, Avijit Sarkar and Orbit Health contributors
+https://kno2gether.com · https://orbitapps.space
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product uses the following third-party components:
+
+- AndroidX, Jetpack Compose and Room (https://developer.android.com/jetpack) - Apache License 2.0.
+- Kotlin, kotlinx.coroutines and kotlinx.serialization (https://kotlinlang.org) - Apache License 2.0.
+- OkHttp (https://square.github.io/okhttp/) - Apache License 2.0.
+- Haze (https://github.com/chrisbanes/haze) - Apache License 2.0.
+- ZXing and zxing-android-embedded (https://github.com/journeyapps/zxing-android-embedded) - Apache License 2.0.
+- SQLCipher for Android (https://www.zetetic.net/sqlcipher/) - BSD-style SQLCipher Community Edition licence.
+- Ktor (https://ktor.io) - Apache License 2.0.
+- Bouncy Castle (https://www.bouncycastle.org) - MIT-style Bouncy Castle Licence.
+- bcrypt (https://github.com/patrickfav/bcrypt) - Apache License 2.0.
+- SQLite JDBC (https://github.com/xerial/sqlite-jdbc) - Apache License 2.0.
+- SLF4J (https://www.slf4j.org) - MIT License.
+- Fraunces and Manrope fonts - SIL Open Font License 1.1 (licence texts ship with the fonts).
+
+Orbit Health is an independent project, not affiliated with or endorsed by any ring
+maker or the makers of their apps. Product names are trademarks of their owners.

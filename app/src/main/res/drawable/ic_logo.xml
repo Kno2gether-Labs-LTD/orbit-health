@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo A "The Orbit", geometry from the mockup symbol (viewBox 100); the launcher keeps this mark; in-app screens draw the Living Skies BrandMark (tokens §1). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="66dp" android:height="66dp" android:viewportWidth="100" android:viewportHeight="100">
+    <group>
+        <path
+            android:pathData="M50,19 a31,31 0 1,1 0,62 a31,31 0 1,1 0,-62 z"
+            android:strokeWidth="17"
+            android:fillColor="#00000000">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="19" android:startY="19" android:endX="81" android:endY="81">
+                    <item android:offset="0" android:color="#FFB9A6FF" />
+                    <item android:offset="0.55" android:color="#FF8B6BFF" />
+                    <item android:offset="1" android:color="#FFFF7EB6" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- Planet: dark #1a1250 rim (r 9..13) cuts it out of the ring, then the glowing body (r 9). -->
+        <path android:fillColor="#FF1A1250" android:pathData="M63,27 a13,13 0 1,0 26,0 a13,13 0 1,0 -26,0 z" />
+        <path android:pathData="M67,27 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0 z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="radial" android:centerX="72.7" android:centerY="22.6" android:gradientRadius="11">
+                    <item android:offset="0" android:color="#FFFFFFFF" />
+                    <item android:offset="0.5" android:color="#FFFFD1EA" />
+                    <item android:offset="1" android:color="#FFFF7EB6" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>

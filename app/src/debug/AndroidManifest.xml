@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The main manifest now declares INTERNET too (Orbit Server). Also used here by the debug-only raw TCP link to the
+         Mac BLE bridge (tools/ble_bridge.py); that is not HTTP, so the cleartext policy does not apply to it. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The receiver requires DUMP: adb shell holds it, other apps cannot send these broadcasts. -->
+    <application>
+        <receiver
+            android:name=".debug.DebugBridgeReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+        <!-- Component gallery for screenshots; exported so adb can launch it. Debug builds only. -->
+        <activity
+            android:name=".debug.GalleryActivity"
+            android:exported="true"
+            android:theme="@style/Theme.OrbitHealth" />
+    </application>
+</manifest>

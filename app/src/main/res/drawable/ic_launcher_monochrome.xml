@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo A "The Orbit", geometry from the mockup symbol (viewBox 100); the launcher keeps this mark; in-app screens draw the Living Skies BrandMark (tokens §1). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.52" android:scaleY="0.52" android:translateX="28" android:translateY="28">
+        <!-- Ring with the planet rim (r 13) cut out exactly, so the planet reads on any tint. -->
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M86.44,34.75 A39.5,39.5 0 1,1 69.58,15.70 A13,13 0 0,0 64.27,32.60 A22.5,22.5 0 1,0 69.01,37.96 A13,13 0 0,0 86.44,34.75 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M67,27 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0 z" />
+    </group>
+</vector>
