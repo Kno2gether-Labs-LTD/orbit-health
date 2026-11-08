@@ -58,6 +58,7 @@ import dev.avijit.orbithealth.ui.measure.MeasureSheet
 import dev.avijit.orbithealth.ui.measure.MeasureViewModel
 import dev.avijit.orbithealth.ui.body.BodyScreen
 import dev.avijit.orbithealth.ui.body.BodyViewModel
+import dev.avijit.orbithealth.ui.sleep.EstimateAnswer
 import dev.avijit.orbithealth.ui.sleep.SleepDeps
 import dev.avijit.orbithealth.ui.sleep.SleepScreen
 import dev.avijit.orbithealth.ui.sleep.SleepViewModel
@@ -65,10 +66,10 @@ import dev.avijit.orbithealth.ui.agent.AgentSyncDeps
 import dev.avijit.orbithealth.ui.agent.AgentSyncScreen
 import dev.avijit.orbithealth.ui.agent.AgentSyncViewModel
 import dev.avijit.orbithealth.ui.agent.BuildAgentDebug
+import dev.avijit.orbithealth.devtools.AppDeveloperTools
 import dev.avijit.orbithealth.ui.ask.AskDeps
 import dev.avijit.orbithealth.ui.ask.AskScreen
 import dev.avijit.orbithealth.ui.ask.AskViewModel
-import dev.avijit.orbithealth.ui.me.BuildDeveloperTools
 import dev.avijit.orbithealth.ui.me.LicencesScreen
 import dev.avijit.orbithealth.ui.me.AutomaticChecksDeps
 import dev.avijit.orbithealth.ui.me.AutomaticChecksScreen
@@ -224,12 +225,14 @@ fun OrbitNavHost(startDestination: String, navController: NavHostController = re
             }
             composable(Routes.ME) {
                 val vm: MeViewModel = viewModel(factory = viewModelFactory { initializer { MeViewModel(appMeDeps(graph)) } })
-                val developer = remember(graph) { BuildDeveloperTools.create(graph) }
+                // Every build: hidden until a shake on Me (the group says so), never reachable from outside the app.
+                val developer = remember(graph) { AppDeveloperTools(graph) }
                 MeScreen(
                     vm, developer,
                     onLicences = { navController.navigate(Routes.LICENCES) { launchSingleTop = true } },
                     onAgentSync = { navController.navigate(Routes.AGENT_SYNC) { launchSingleTop = true } },
                     onAutomaticChecks = { navController.navigate(Routes.AUTO_CHECKS) { launchSingleTop = true } },
+                    updates = graph.updates,
                     onReset = {
                         // Everything is wiped: start again at Welcome.
                         navController.navigate(Routes.ONBOARDING) {
@@ -276,7 +279,20 @@ fun appTodayDeps(graph: AppGraph) = TodayDeps(
     refresh = { withContext(Dispatchers.Default) { graph.syncEngine.syncOnce() } },
     clock = Clock.systemDefaultZone(),
     vendorAppName = graph.vendorAppName,
+    estimates = { from, to -> graph.sleepEstimates.estimates(from, to) },
+    answerEstimate = { answerEstimate(graph, it) },
+    detectEstimates = { withContext(Dispatchers.IO) { graph.sleepEstimates.refresh() } },
 )
+
+/** Stores a Yes / Adjust / No on an estimated night or nap. */
+private suspend fun answerEstimate(graph: AppGraph, a: EstimateAnswer) {
+    withContext(Dispatchers.IO) {
+        when (a) {
+            is EstimateAnswer.Confirm -> graph.sleepEstimates.confirm(a.id, a.start, a.end)
+            is EstimateAnswer.Dismiss -> graph.sleepEstimates.dismiss(a.id)
+        }
+    }
+}
 
 /** Sleep wired to the encrypted database and settings. */
 fun appSleepDeps(graph: AppGraph) = SleepDeps(
@@ -284,6 +300,9 @@ fun appSleepDeps(graph: AppGraph) = SleepDeps(
     sleepSessions = { from, to -> graph.repository.sleepSessions(from, to) },
     settings = graph.settings.values,
     clock = Clock.systemDefaultZone(),
+    estimates = { from, to -> graph.sleepEstimates.estimates(from, to) },
+    answerEstimate = { answerEstimate(graph, it) },
+    detectEstimates = { withContext(Dispatchers.IO) { graph.sleepEstimates.refresh() } },
 )
 
 /** Body wired to the database and settings. */
@@ -375,6 +394,7 @@ fun appMeDeps(graph: AppGraph) = MeDeps(
     serverName = graph.server.pairedServer.map { it?.name },
     sentSince = { from -> graph.server.bytesSentSince(from).flowOn(Dispatchers.IO) },
     vendorAppName = graph.vendorAppName,
+    bridgeActive = graph.bridgeActive,
 )
 
 private class SettingsMeStore(private val settings: Settings) : MeStore {

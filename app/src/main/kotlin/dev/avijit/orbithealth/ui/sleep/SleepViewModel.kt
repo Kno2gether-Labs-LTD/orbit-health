@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.avijit.orbithealth.insights.Score
 import dev.avijit.orbithealth.insights.Scores
+import dev.avijit.orbithealth.insights.SleepEstimate
+import dev.avijit.orbithealth.insights.SleepEstimates
 import dev.avijit.orbithealth.prefs.SettingsSnapshot
 import dev.avijit.orbithealth.ring.Metric
 import dev.avijit.orbithealth.ring.Sample
@@ -33,9 +35,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /** Everything Sleep reads, so the screen logic runs against fakes in tests. */
 class SleepDeps(
@@ -48,6 +52,12 @@ class SleepDeps(
     val zone: ZoneId = ZoneId.systemDefault(),
     /** Where aggregation runs; never the main thread. */
     val compute: CoroutineDispatcher = Dispatchers.Default,
+    /** Estimated sleep (any status) ending in the range. */
+    val estimates: (Instant, Instant) -> Flow<List<SleepEstimate>> = { _, _ -> flowOf(emptyList()) },
+    /** Stores the user's answer to a suggestion. */
+    val answerEstimate: suspend (EstimateAnswer) -> Unit = {},
+    /** Looks for sleep the ring missed (idempotent); run when Sleep opens. */
+    val detectEstimates: suspend () -> Unit = {},
 )
 
 /** One night, ready to draw. */
@@ -77,10 +87,17 @@ data class SleepUiState(
     val hrvVsNormal: Int? = null,
     /** Lowest SpO₂ reading of the night. */
     val lowSpo2: Int? = null,
+    /** A confirmed estimate standing in for a night the ring missed: times only, no stages. */
+    val estimated: Boolean = false,
 )
 
 /** The nights to page through, oldest first (the newest is shown first). Empty when no sleep was recorded. */
-data class SleepScreenState(val loaded: Boolean = false, val nights: List<SleepUiState> = emptyList())
+data class SleepScreenState(
+    val loaded: Boolean = false,
+    val nights: List<SleepUiState> = emptyList(),
+    /** A recent night the ring missed, waiting for Yes / Adjust / No. */
+    val suggestion: EstimateSuggestion? = null,
+)
 
 object SleepMath {
     /** Nights to page back through. */
@@ -183,7 +200,11 @@ object SleepMath {
     private fun avgHrv(s: SleepSession, hrv: List<Sample>): Double? =
         hrv.filter { it.time >= s.start && it.time <= s.end }.takeIf { it.isNotEmpty() }?.map { it.value }?.average()
 
-    /** Every recorded night with stages, oldest first. */
+    /**
+     * Every recorded night with stages, plus confirmed estimates for nights the ring missed (see
+     * [SleepEstimates.confirmedNights]: the ring's night always wins), oldest first. Estimated nights take part in the
+     * usual bedtime and HRV like any other.
+     */
     internal fun nights(
         sessions: List<SleepSession>,
         hr: List<Sample>,
@@ -192,17 +213,22 @@ object SleepMath {
         today: LocalDate,
         zone: ZoneId,
         hrv: List<Sample> = emptyList(),
+        estimates: List<SleepEstimate> = emptyList(),
     ): List<SleepUiState> {
-        val withStages = sessions.filter { s -> s.segments.any { it.durationSec > 0 } }.sortedBy { it.start }
+        val withStages = sessions.filter { s -> s.segments.any { it.durationSec > 0 } }
+        val estimated = SleepEstimates.confirmedNights(estimates, withStages, zone).associateBy { it.asSession() }
+        val all = (withStages + estimated.keys).sortedBy { it.start }
         val hrSorted = hr.sortedBy { it.time }
         val spo2Sorted = spo2.sortedBy { it.time }
         val hrvSorted = hrv.sortedBy { it.time }
-        val nightHrv = withStages.map { avgHrv(it, hrvSorted) }
-        return withStages.mapIndexed { i, s ->
+        val nightHrv = all.map { avgHrv(it, hrvSorted) }
+        return all.mapIndexed { i, s ->
             // The usual HRV: the nights before this one that have readings, the latest BEDTIME_NIGHTS of them.
             val earlier = nightHrv.subList(0, i).filterNotNull().takeLast(BEDTIME_NIGHTS)
             val usual = if (earlier.size >= MIN_BEDTIME_NIGHTS) earlier.average() else null
-            night(s, withStages, hrSorted, spo2Sorted, sleepGoalMin, today, zone, hrvSorted, usual)
+            val n = night(s, all, hrSorted, spo2Sorted, sleepGoalMin, today, zone, hrvSorted, usual)
+            val e = estimated[s] ?: return@mapIndexed n
+            n.copy(score = SleepEstimates.score(e, sleepGoalMin), duration = hm(e.durationSec), estimated = true)
         }
     }
 }
@@ -223,19 +249,37 @@ class SleepViewModel(private val deps: SleepDeps, scope: CoroutineScope? = null)
         val from = d.minusDays(SleepMath.NIGHTS + SleepMath.BEDTIME_NIGHTS + 1).atStartOfDay(deps.zone).toInstant()
         val shownFrom = d.minusDays(SleepMath.NIGHTS).atStartOfDay(deps.zone).toInstant().minus(Duration.ofHours(12))
         combine(
-            deps.sleepSessions(from, to).distinctUntilChanged(),
-            deps.samples(Metric.HEART_RATE, shownFrom, to).distinctUntilChanged(),
-            deps.samples(Metric.SPO2, shownFrom, to).distinctUntilChanged(),
-            deps.samples(Metric.HRV, shownFrom, to).distinctUntilChanged(),
-            goal,
-        ) { sessions, hr, spo2, hrv, g -> Input(sessions, hr, spo2, hrv, g) }
+            combine(
+                deps.sleepSessions(from, to).distinctUntilChanged(),
+                deps.samples(Metric.HEART_RATE, shownFrom, to).distinctUntilChanged(),
+                deps.samples(Metric.SPO2, shownFrom, to).distinctUntilChanged(),
+                deps.samples(Metric.HRV, shownFrom, to).distinctUntilChanged(),
+                goal,
+            ) { sessions, hr, spo2, hrv, g -> Input(sessions, hr, spo2, hrv, g) },
+            deps.estimates(from, to).distinctUntilChanged(),
+        ) { i, e -> i to e }
             .conflate()
-            .map { i ->
-                val all = SleepMath.nights(i.sessions, i.hr, i.spo2, i.goal, d, deps.zone, i.hrv)
-                SleepScreenState(loaded = true, nights = all.filter { it.session.end >= shownFrom })
+            .map { (i, estimates) ->
+                val all = SleepMath.nights(i.sessions, i.hr, i.spo2, i.goal, d, deps.zone, i.hrv, estimates)
+                val since = d.minusDays(1).atStartOfDay(deps.zone).toInstant()
+                SleepScreenState(
+                    loaded = true,
+                    nights = all.filter { it.session.end >= shownFrom },
+                    suggestion = SleepEstimates.pendingNight(estimates, i.sessions, since, deps.zone)
+                        ?.let { EstimateCopy.suggestion(it, deps.zone) },
+                )
             }
     }.flowOn(deps.compute)
         .stateIn(this.scope, SharingStarted.WhileSubscribed(5_000), SleepScreenState())
+
+    init {
+        this.scope.launch { runCatching { deps.detectEstimates() } }
+    }
+
+    /** The user's Yes / Adjust / No on the night the ring missed. */
+    fun answer(a: EstimateAnswer) {
+        scope.launch { deps.answerEstimate(a) }
+    }
 
     private class Input(
         val sessions: List<SleepSession>,

@@ -57,7 +57,7 @@ data class SettingsSnapshot(
     val stepGoalBase: Int = 8000,
     val sleepGoalMin: Int = 450,
     val bedtimeTarget: LocalTime = LocalTime.of(23, 15),
-    /** Debug builds only: talk to the ring through the Mac BLE bridge. Ignored by release builds. */
+    /** Developer switch (shake on Me): talk to the ring through the loopback-only Mac BLE bridge. */
     val useMacBridge: Boolean = false,
     /** Onboarding asked for the battery-optimisation exemption once; never ask again. */
     val batteryPromptAsked: Boolean = false,
@@ -69,6 +69,12 @@ data class SettingsSnapshot(
     val appLockEnabled: Boolean = true,
     /** Seconds in the background before the app locks again. */
     val lockAfterSec: Int = 60,
+    /** "Check for updates automatically" (GitHub Releases, at most once a day). On by default. */
+    val updateAutoCheck: Boolean = true,
+    /** When the update check last ran (automatic or manual); null before the first. */
+    val updateLastCheckAt: Instant? = null,
+    /** The newest release version that check saw ("0.7.1"); null when it saw none. */
+    val updateLastSeenVersion: String? = null,
 ) {
     /** The paired ring, or null before onboarding. */
     val pairedRing: PairedRing? get() = PairedRing.fromStored(ringAddress, ringFamilyId, ringModelName)
@@ -145,6 +151,12 @@ class Settings(context: Context) {
     suspend fun setCoexistenceBannerDismissedAt(at: Instant) = store.edit { it[BANNER_DISMISSED_AT] = at.toEpochMilli() }
     suspend fun setAppLockEnabled(v: Boolean) = store.edit { it[APP_LOCK_ENABLED] = v }
     suspend fun setLockAfterSec(v: Int) = store.edit { it[LOCK_AFTER_SEC] = v }
+    suspend fun setUpdateAutoCheck(v: Boolean) = store.edit { it[UPDATE_AUTO_CHECK] = v }
+    /** Records an update check at [at] that saw [seenVersion] as the latest release (null: none). */
+    suspend fun recordUpdateCheck(at: Instant, seenVersion: String?) = store.edit {
+        it[UPDATE_LAST_CHECK] = at.toEpochMilli()
+        if (seenVersion == null) it.remove(UPDATE_SEEN_VERSION) else it[UPDATE_SEEN_VERSION] = seenVersion
+    }
 
     /** Forgets every setting (ring, profile, goals). */
     suspend fun clearAll() = store.edit { it.clear() }
@@ -208,6 +220,9 @@ class Settings(context: Context) {
                 coexistenceBannerDismissedAt = p[BANNER_DISMISSED_AT]?.let(Instant::ofEpochMilli),
                 appLockEnabled = p[APP_LOCK_ENABLED] ?: d.appLockEnabled,
                 lockAfterSec = p[LOCK_AFTER_SEC] ?: d.lockAfterSec,
+                updateAutoCheck = p[UPDATE_AUTO_CHECK] ?: d.updateAutoCheck,
+                updateLastCheckAt = p[UPDATE_LAST_CHECK]?.let(Instant::ofEpochMilli),
+                updateLastSeenVersion = p[UPDATE_SEEN_VERSION],
             )
         }
 
@@ -246,5 +261,8 @@ class Settings(context: Context) {
         private val BANNER_DISMISSED_AT = longPreferencesKey("coexistence_banner_dismissed_at_ms")
         private val APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
         private val LOCK_AFTER_SEC = intPreferencesKey("lock_after_sec")
+        private val UPDATE_AUTO_CHECK = booleanPreferencesKey("update_auto_check")
+        private val UPDATE_LAST_CHECK = longPreferencesKey("update_last_check_ms")
+        private val UPDATE_SEEN_VERSION = stringPreferencesKey("update_last_seen_version")
     }
 }

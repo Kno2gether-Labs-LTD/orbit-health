@@ -35,7 +35,8 @@ import kotlinx.coroutines.launch
 class SyncService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loop: Job? = null
-    private val engine get() = (application as OrbitApp).graph.syncEngine
+    private val graph get() = (application as OrbitApp).graph
+    private val engine get() = graph.syncEngine
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -85,7 +86,7 @@ class SyncService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_logo_mono)
-            .setContentTitle(statusText(s, Instant.now()))
+            .setContentTitle(statusText(s, Instant.now(), bridge = graph.transportKind == TransportKind.DEBUG_BRIDGE))
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -102,7 +103,9 @@ class SyncService : Service() {
             ContextCompat.startForegroundService(context, Intent(context, SyncService::class.java))
         }
 
-        fun statusText(s: SyncState, now: Instant): String = "Orbit Health · " + when (s) {
+        /** The notification line; [bridge] (developer Mac bridge in use) puts "using Mac bridge" right after the name. */
+        fun statusText(s: SyncState, now: Instant, bridge: Boolean = false): String =
+            "Orbit Health · " + (if (bridge) "using Mac bridge · " else "") + when (s) {
             is SyncState.Synced -> "synced ${Duration.between(s.at, now).toMinutes().coerceAtLeast(0)} min ago"
             SyncState.Idle -> "waiting to sync"
             SyncState.Connecting -> "connecting to ring"

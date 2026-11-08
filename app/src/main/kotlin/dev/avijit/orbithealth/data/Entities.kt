@@ -40,8 +40,9 @@ data class WorkoutEntity(
 )
 
 /**
- * One request the app made over the internet (only ever to the user's paired Orbit Server): when, to which host,
- * why ([purpose]: pair, state, ingest, ask, access_log, scopes, revoke), HTTP bytes each way, and whether it succeeded.
+ * One request the app made over the internet (to the user's paired Orbit Server, or to GitHub for app updates): when,
+ * to which host, why ([purpose]: pair, state, ingest, ask, access_log, scopes, revoke; update_check, update_checksum,
+ * update_download), HTTP bytes each way, and whether it succeeded.
  * Feeds Data & privacy ("Sent to the internet this month").
  */
 @Entity(tableName = "network_log")
@@ -53,4 +54,26 @@ data class NetworkLogEntity(
     val bytesUp: Long,
     val bytesDown: Long,
     val ok: Boolean,
+)
+
+/**
+ * A sleep the app estimated because the ring recorded none (see insights/SleepEstimator), and what the user made of it.
+ * [startMs]..[endMs] are shown (the user's times once adjusted); [detectedStartMs]..[detectedEndMs] were suggested.
+ * [kind]: NIGHT or NAP. [status]: SUGGESTED, CONFIRMED or DISMISSED. [decidedAtMs]: when the user answered (null while
+ * suggested). Never exported: the ring's own sleep tables are what the server receives.
+ */
+@Entity(tableName = "sleep_estimates", indices = [Index(value = ["endMs"])])
+data class SleepEstimateEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val kind: String,
+    val status: String,
+    val startMs: Long,
+    val endMs: Long,
+    val detectedStartMs: Long,
+    val detectedEndMs: Long,
+    val lowestHr: Int?,
+    val lowestSpo2: Int?,
+    val confidence: Double,
+    val createdAtMs: Long,
+    val decidedAtMs: Long?,
 )

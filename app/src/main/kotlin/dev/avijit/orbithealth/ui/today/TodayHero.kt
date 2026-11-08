@@ -350,13 +350,15 @@ private fun BoxScope.SleepContent(state: TodayUiState, pageOffset: () -> Float, 
         return
     }
     Column(Modifier.padding(start = 20.dp, end = 20.dp, top = HeroDefaults.StripTop)) {
-        HeroHypnogram(night, Modifier.fillMaxWidth().height(HeroDefaults.StripHeight))
+        if (state.lastNightEstimated) EstimatedStrip(Modifier.fillMaxWidth().height(HeroDefaults.StripHeight))
+        else HeroHypnogram(night, Modifier.fillMaxWidth().height(HeroDefaults.StripHeight))
+        val asleepSec = if (state.lastNightEstimated) (night.end.epochSecond - night.start.epochSecond).toInt() else night.totalSleepSec
         val hhmm = remember { DateTimeFormatter.ofPattern("HH:mm") }
         val zone = remember { ZoneId.systemDefault() }
         Row(Modifier.padding(top = 8.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(night.start.atZone(zone).format(hhmm), style = OrbitTypography.Caption, color = OrbitPalette.InkSky2, modifier = Modifier.lineBox(OrbitTypography.Caption))
             Text(
-                "${TodayCopy.hm(night.totalSleepSec)} asleep", style = OrbitTypography.Caption, color = OrbitPalette.Ink,
+                "${TodayCopy.hm(asleepSec)} asleep", style = OrbitTypography.Caption, color = OrbitPalette.Ink,
                 textAlign = TextAlign.Center, modifier = Modifier.weight(1f).lineBox(OrbitTypography.Caption),
             )
             Text(night.end.atZone(zone).format(hhmm), style = OrbitTypography.Caption, color = OrbitPalette.InkSky2, modifier = Modifier.lineBox(OrbitTypography.Caption))
@@ -456,6 +458,21 @@ internal fun HeroHypnogram(session: SleepSession, modifier: Modifier = Modifier)
             x += w
             prevY = y
         }
+    }
+}
+
+/**
+ * An estimated night in the hero: one quiet bar for the time asleep, in the strip's middle row, no stages drawn (none are
+ * known), so it never looks like the ring's hypnogram.
+ */
+@Composable
+internal fun EstimatedStrip(modifier: Modifier = Modifier) {
+    Canvas(modifier.semantics { contentDescription = "Estimated sleep, no stages" }) {
+        val barH = 6.dp.toPx()
+        val y = (size.height - barH) / 2f
+        drawRoundRect(
+            OrbitPalette.StageLight.copy(alpha = 0.32f), Offset(0f, y), Size(size.width, barH), cornerRadius = CornerRadius(barH / 2),
+        )
     }
 }
 

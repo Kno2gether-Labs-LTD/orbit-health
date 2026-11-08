@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.max
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.avijit.orbithealth.ui.charts.Hypnogram
 import dev.avijit.orbithealth.ui.charts.StageSplitBar
+import dev.avijit.orbithealth.ui.components.EstimateBadge
 import dev.avijit.orbithealth.ui.components.LocalHazeState
 import dev.avijit.orbithealth.ui.components.MiniMetricCard
 import dev.avijit.orbithealth.ui.components.OrbitArc
@@ -117,7 +118,7 @@ private val Edge = skySpec(SkyKind.NIGHT).stops.first().color
 @Composable
 fun SleepScreen(vm: SleepViewModel, onBack: () -> Unit = {}, focusNight: Long? = null, heroScore: Int? = null) {
     val state by vm.state.collectAsStateWithLifecycle()
-    SleepContent(state, onBack = onBack, focusNight = focusNight, heroScore = heroScore)
+    SleepContent(state, onBack = onBack, focusNight = focusNight, heroScore = heroScore, onAnswerEstimate = vm::answer)
 }
 
 /**
@@ -137,6 +138,8 @@ fun SleepContent(
     onBack: () -> Unit = {},
     focusNight: Long? = null,
     heroScore: Int? = null,
+    /** Yes / Adjust / No on a night the ring missed. */
+    onAnswerEstimate: (EstimateAnswer) -> Unit = {},
 ) {
     val haze = LocalHazeState.current
     Box(
@@ -151,14 +154,20 @@ fun SleepContent(
                 word = heroScore?.let { TodayCopy.status(it).word } ?: "", wordColor = heroScore?.let { TodayCopy.status(it).color() } ?: Color.Transparent,
                 meta = "", shared = true, animateSky = true, onBack = onBack,
             )
-            state.nights.isEmpty() -> EmptySleep(onBack)
-            else -> NightPager(state.nights, focusNight, onBack)
+            state.nights.isEmpty() -> EmptySleep(onBack, state.suggestion, onAnswerEstimate)
+            else -> NightPager(state.nights, focusNight, onBack, state.suggestion, onAnswerEstimate)
         }
     }
 }
 
 @Composable
-private fun NightPager(nights: List<SleepUiState>, focusNight: Long?, onBack: () -> Unit) {
+private fun NightPager(
+    nights: List<SleepUiState>,
+    focusNight: Long?,
+    onBack: () -> Unit,
+    suggestion: EstimateSuggestion?,
+    onAnswerEstimate: (EstimateAnswer) -> Unit,
+) {
     val focus = remember(nights, focusNight) {
         nights.indexOfFirst { it.session.start.toEpochMilli() == focusNight }.takeIf { it >= 0 } ?: nights.lastIndex
     }
@@ -179,6 +188,9 @@ private fun NightPager(nights: List<SleepUiState>, focusNight: Long?, onBack: ()
             onBack = onBack,
             onPrev = if (page > 0) ({ scope.launch { pager.animateScrollToPage(page - 1) } }) else null,
             onNext = if (page < nights.lastIndex) ({ scope.launch { pager.animateScrollToPage(page + 1) } }) else null,
+            // A night the ring missed is asked about on the newest page, where you land.
+            suggestion = suggestion.takeIf { page == nights.lastIndex },
+            onAnswerEstimate = onAnswerEstimate,
         )
     }
 }
@@ -197,6 +209,8 @@ private fun NightPage(
     onBack: () -> Unit,
     onPrev: (() -> Unit)?,
     onNext: (() -> Unit)?,
+    suggestion: EstimateSuggestion? = null,
+    onAnswerEstimate: (EstimateAnswer) -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = bottomClearance())) {
         val score = night.score?.value
@@ -206,19 +220,25 @@ private fun NightPage(
             numeral = { shown -> if (score == null) "—" else (shown * 100).roundToInt().toString() },
             word = score?.let { TodayCopy.status(it).word } ?: "No score",
             wordColor = score?.let { TodayCopy.status(it).color() } ?: OrbitPalette.InkSky2,
-            meta = "${night.duration} asleep · ${night.timeRange}",
+            meta = if (night.estimated) "About ${night.duration} · ${night.timeRange}" else "${night.duration} asleep · ${night.timeRange}",
             shared = shared,
             animateSky = current,
             onBack = onBack, onPrev = onPrev, onNext = onNext,
             description = score?.let { "Sleep score $it, ${TodayCopy.status(it).word}" } ?: "No sleep score",
         )
+        suggestion?.let { s ->
+            androidx.compose.runtime.key(s.id) {
+                NightSuggestionCard(s, onAnswerEstimate, Modifier.livingEnter(0).padding(start = Gutter, end = Gutter, top = 22.dp))
+            }
+        }
         night.insight?.let {
             Text(
                 leadText(it), style = OrbitTypography.InsightLg,
                 modifier = Modifier.livingEnter(0).padding(start = Gutter, end = Gutter, top = 22.dp),
             )
         }
-        StagesCard(night, Modifier.livingEnter(60).padding(start = Gutter, end = Gutter, top = 20.dp))
+        if (night.estimated) EstimatedNightCard(Modifier.livingEnter(60).padding(start = Gutter, end = Gutter, top = 20.dp))
+        else StagesCard(night, Modifier.livingEnter(60).padding(start = Gutter, end = Gutter, top = 20.dp))
         NightMinis(night, Modifier.padding(start = Gutter, end = Gutter, top = 12.dp))
     }
 }
@@ -354,6 +374,25 @@ private fun StagesCard(night: SleepUiState, modifier: Modifier) {
     }
 }
 
+/** In place of the Stages card for a confirmed estimate: plainly, why there are no stages. */
+@Composable
+private fun EstimatedNightCard(modifier: Modifier) {
+    TintedCard(OrbitPalette.SleepA, modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(18.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                EstimateCopy.EstimatedNightTitle, style = OrbitTypography.BodyStrong,
+                modifier = Modifier.weight(1f).lineBox(OrbitTypography.BodyStrong),
+            )
+            EstimateBadge()
+        }
+        Text(EstimateCopy.EstimatedNightBody, style = OrbitTypography.Meta, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            EstimateCopy.NoStages, style = OrbitTypography.Caption, color = OrbitPalette.InkSky2,
+            modifier = Modifier.padding(top = 14.dp).lineBox(OrbitTypography.Caption),
+        )
+    }
+}
+
 @Composable
 private fun NightMinis(night: SleepUiState, modifier: Modifier) {
     Row(modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -389,12 +428,17 @@ private fun NightMinis(night: SleepUiState, modifier: Modifier) {
 }
 
 @Composable
-private fun EmptySleep(onBack: () -> Unit) {
+private fun EmptySleep(onBack: () -> Unit, suggestion: EstimateSuggestion? = null, onAnswerEstimate: (EstimateAnswer) -> Unit = {}) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = bottomClearance())) {
         NightHeader(
             title = "Sleep", fraction = null, numeral = { "—" }, word = "No nights yet", wordColor = OrbitPalette.InkSky2,
             meta = "", shared = true, animateSky = true, onBack = onBack, description = "No sleep recorded yet",
         )
+        suggestion?.let { s ->
+            androidx.compose.runtime.key(s.id) {
+                NightSuggestionCard(s, onAnswerEstimate, Modifier.livingEnter(0).padding(start = Gutter, end = Gutter, top = 22.dp))
+            }
+        }
         TintedCard(OrbitPalette.SleepA, Modifier.livingEnter(0).padding(start = Gutter, end = Gutter, top = 22.dp).fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(44.dp).background(OrbitPalette.SleepB.copy(alpha = 0.16f), androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {

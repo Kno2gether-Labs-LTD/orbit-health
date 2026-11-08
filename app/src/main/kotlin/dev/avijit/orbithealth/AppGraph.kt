@@ -6,10 +6,12 @@ import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-import dev.avijit.orbithealth.ble.BuildTransportProvider
+import dev.avijit.orbithealth.ble.AppTransportProvider
+import dev.avijit.orbithealth.ble.BridgeCode
 import dev.avijit.orbithealth.ble.TransportProvider
 import dev.avijit.orbithealth.data.OrbitDatabase
 import dev.avijit.orbithealth.data.SampleRepository
+import dev.avijit.orbithealth.data.SleepEstimateRepository
 import dev.avijit.orbithealth.prefs.Settings
 import dev.avijit.orbithealth.prefs.PairedRing
 import dev.avijit.orbithealth.ring.DeviceInfo
@@ -54,9 +56,20 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /** Manual DI: one instance per process, created in [OrbitApp]. */
-class AppGraph(context: Context, private val transports: TransportProvider = BuildTransportProvider) {
+class AppGraph(context: Context, transportOverride: TransportProvider? = null) {
     private val app = context.applicationContext
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * The Mac bridge code for this process: made when "Use Mac bridge" is turned on, shown in Developer options, never
+     * stored. Without it the bridge is never used (see [AppTransportProvider]).
+     */
+    val bridgeCode = MutableStateFlow<String?>(null)
+    private val transports: TransportProvider = transportOverride ?: AppTransportProvider(
+        bridgeCode = { bridgeCode.value },
+        // A failed handshake spent this code (its proof could be guessed from offline): show a new one.
+        retireCode = { spent -> if (bridgeCode.compareAndSet(spent, BridgeCode.generate())) Log.i("OrbitBridge", "Mac bridge handshake failed: new code shown in Developer options") },
+    )
 
     /**
      * Every ring family this build supports. To add a ring: add its module (implementing RingFamily), append its
@@ -69,6 +82,8 @@ class AppGraph(context: Context, private val transports: TransportProvider = Bui
     /** The single encrypted database for the process. Opened lazily (off the main thread by its first user). */
     val database: OrbitDatabase by lazy { OrbitDatabase.open(app) }
     val repository: SampleRepository by lazy { SampleRepository(database) }
+    /** Sleep the ring missed, estimated on the phone (never sent to the server). */
+    val sleepEstimates: SleepEstimateRepository by lazy { SleepEstimateRepository(database, repository, Clock.systemUTC()) }
     val settings = Settings(app)
     /** Vendor apps that force COEXISTENCE: the paired family's (every family's until settings are read / nothing is paired). */
     private val vendorPackages = MutableStateFlow(ringRegistry.vendorAppPackagesFor(null))
@@ -113,8 +128,24 @@ class AppGraph(context: Context, private val transports: TransportProvider = Bui
             onMonitoringAccepted = { settings.recordRingMonitoringAccepted(it) },
             onDeviceInfo = { lastDeviceInfo = it; settings.setDeviceInfo(it) },
             onCapabilities = { settings.setRingCapabilities(it) },
-            onStored = { serverSync.afterRingSync() },
+            onStored = { detectSleepEstimates(); serverSync.afterRingSync() },
         )
+    }
+
+    /**
+     * Looks for sleep the ring missed, in the background: after every stored ring sync (the moment new heart rate and
+     * steps arrive). Idempotent; never touches an answered estimate.
+     */
+    fun detectSleepEstimates() {
+        appScope.launch {
+            try {
+                sleepEstimates.refresh()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("SleepEstimates", "detection failed: ${e.javaClass.simpleName}") // never values
+            }
+        }
     }
 
     /** The ring's identity, firmware and battery from the latest handshake in this process (sent to the server). */
@@ -148,6 +179,28 @@ class AppGraph(context: Context, private val transports: TransportProvider = Bui
         )
     }
 
+    // ---- App updates from GitHub Releases (the only other network use; the user can turn the automatic check off) ----
+
+    /** Check, download, verify and install. Debug builds check but never install (they are signed with another key). */
+    val updates: dev.avijit.orbithealth.update.UpdateManager by lazy {
+        val github = dev.avijit.orbithealth.update.GitHubUpdateSource(
+            http = dev.avijit.orbithealth.update.GitHubUpdateSource.client(),
+            netLog = networkRecorder,
+            userAgent = "OrbitHealth/${BuildConfig.VERSION_NAME}",
+            downloadDir = File(app.cacheDir, "updates"),
+        )
+        dev.avijit.orbithealth.update.UpdateManager(
+            currentVersion = BuildConfig.VERSION_NAME,
+            installsHere = !BuildConfig.DEBUG,
+            prefs = dev.avijit.orbithealth.update.SettingsUpdatePrefs(settings),
+            source = github,
+            downloader = github,
+            platform = dev.avijit.orbithealth.update.AndroidUpdatePlatform(app),
+            clock = Clock.systemUTC(),
+            scope = appScope,
+        )
+    }
+
     /** The Ask conversation for this process (memory only). */
     val askSession = dev.avijit.orbithealth.ui.ask.AskSession()
 
@@ -172,8 +225,19 @@ class AppGraph(context: Context, private val transports: TransportProvider = Bui
         return transports.connect(app, kind, s, ringRegistry)
     }
 
-    /** True when this build talks to the ring through the debug Mac bridge (never in release). */
+    /** True while the developer switch routes the ring through the Mac bridge (loopback only). */
     suspend fun usesDebugBridge(): Boolean = transports.kindFor(settings.current()) == TransportKind.DEBUG_BRIDGE
+
+    /** [usesDebugBridge] as a flow, for the "Using Mac bridge" indicators on Me and in the sync notification. */
+    val bridgeActive: Flow<Boolean> =
+        combine(settings.values.map { it.useMacBridge }, bridgeCode) { on, code -> on && code != null }.distinctUntilChanged()
+
+    /** Turns the Mac bridge on (with a fresh code) or off, and drops the current link so the next sync uses the change. */
+    suspend fun setUseMacBridge(on: Boolean) {
+        bridgeCode.value = if (on) BridgeCode.generate() else null
+        settings.setUseMacBridge(on)
+        syncEngine.disconnect()
+    }
 
     /** Opens a link to [ring] before it is saved (onboarding), over the transport this build uses. */
     suspend fun connectTo(ring: PairedRing): RingConnection {
@@ -183,6 +247,18 @@ class AppGraph(context: Context, private val transports: TransportProvider = Bui
 
     /** Starts background bookkeeping; called once from [OrbitApp.onCreate]. */
     fun start() {
+        appScope.launch {
+            if (BuildConfig.DEBUG) {
+                // Debug: a bridge left on keeps working after a restart, with a new code (adb logcat -s OrbitBridge).
+                if (settings.current().useMacBridge) {
+                    bridgeCode.value = BridgeCode.generate()
+                    Log.i("OrbitBridge", "Mac bridge on: run ble_bridge.py --code ${bridgeCode.value}")
+                }
+            } else {
+                // Release: the bridge never survives a cold start; it must be switched on (and a code read off) again.
+                settings.setUseMacBridge(false)
+            }
+        }
         // Time spent in the background decides whether the app locks again (main thread: ProcessLifecycleOwner).
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = appLock.onForegrounded()
@@ -202,5 +278,7 @@ class AppGraph(context: Context, private val transports: TransportProvider = Bui
         // screen is alive.
         // (From the sealed store, which needs no database.)
         askSession.follow(serverStore.paired.map { it?.deviceId }, appScope)
+        // At most once a day, release builds only, unless the user turned it off (UpdateManager/UpdatePolicy).
+        appScope.launch(Dispatchers.IO) { runCatching { updates.autoCheckIfDue() } }
     }
 }

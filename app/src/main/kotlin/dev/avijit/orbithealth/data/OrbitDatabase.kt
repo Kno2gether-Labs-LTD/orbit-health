@@ -11,9 +11,9 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 @Database(
     entities = [
         SampleEntity::class, SleepSessionEntity::class, SleepSegmentEntity::class, WorkoutEntity::class,
-        NetworkLogEntity::class,
+        NetworkLogEntity::class, SleepEstimateEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true, // schema JSON lives in app/schemas; keep every version for migrations
 )
 abstract class OrbitDatabase : RoomDatabase() {
@@ -21,6 +21,7 @@ abstract class OrbitDatabase : RoomDatabase() {
     abstract fun sleepDao(): SleepDao
     abstract fun workoutDao(): WorkoutDao
     abstract fun networkLogDao(): NetworkLogDao
+    abstract fun sleepEstimateDao(): SleepEstimateDao
 
     companion object {
         /** Production: SQLCipher-encrypted with the Keystore-wrapped [DbKey]. */
@@ -44,8 +45,21 @@ abstract class OrbitDatabase : RoomDatabase() {
             }
         }
 
+        /** v3 (estimated sleep): the `sleep_estimates` table. Existing tables are untouched. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `sleep_estimates` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, `status` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, " +
+                        "`detectedStartMs` INTEGER NOT NULL, `detectedEndMs` INTEGER NOT NULL, `lowestHr` INTEGER, " +
+                        "`lowestSpo2` INTEGER, `confidence` REAL NOT NULL, `createdAtMs` INTEGER NOT NULL, `decidedAtMs` INTEGER)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sleep_estimates_endMs` ON `sleep_estimates` (`endMs`)")
+            }
+        }
+
         /** Every schema step; never destructive (this database is the only copy of the user's history). */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 
         /** Tests: unencrypted in-memory database. */
         fun inMemory(context: Context): OrbitDatabase =

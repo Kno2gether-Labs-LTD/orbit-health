@@ -18,8 +18,8 @@ android {
         applicationId = "dev.avijit.orbithealth"
         minSdk = 31
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.6.0"
+        versionCode = 6
+        versionName = "0.7.0"
     }
     // Release signing is optional: only configured when all four Gradle properties are present
     // (e.g. in ~/.gradle/gradle.properties, never in the repository). ORBITHEALTH_RELEASE_* wins; otherwise the
@@ -47,7 +47,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    // BuildConfig: VERSION_NAME for the update check, DEBUG to keep debug-only behaviour out of release.
+    buildFeatures { compose = true; buildConfig = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
 }
 

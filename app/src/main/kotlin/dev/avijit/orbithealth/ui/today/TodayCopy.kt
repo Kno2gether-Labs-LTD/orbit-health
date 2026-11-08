@@ -64,11 +64,13 @@ object TodayCopy {
      * The one- or two-sentence summary under the greeting: last night's sleep (with "your deepest night this week"
      * when it had the most deep-stage sleep of seven, see [TodayMath.deepestNight]), then what the body is ready for.
      */
-    fun daySentence(sleepSec: Int?, deepest: Boolean, readiness: Int?, baselineDays: Int): String {
+    fun daySentence(sleepSec: Int?, deepest: Boolean, readiness: Int?, baselineDays: Int, estimated: Boolean = false): String {
         if (sleepSec == null && readiness == null && baselineDays == 0) {
             return "Wear your ring tonight and Orbit will start learning your rhythm."
         }
-        val slept = sleepSec?.let { "You slept ${hm(it)}" + (if (deepest) ", your deepest night this week" else "") + "." }
+        val slept = sleepSec?.let {
+            "You slept ${if (estimated) "about " else ""}${hm(it)}" + (if (deepest) ", your deepest night this week" else "") + "."
+        }
         val ready = when {
             readiness == null && baselineDays < Baselines.MIN_DAYS -> "Orbit is still learning your baseline."
             readiness == null -> "Pull down to sync last night."

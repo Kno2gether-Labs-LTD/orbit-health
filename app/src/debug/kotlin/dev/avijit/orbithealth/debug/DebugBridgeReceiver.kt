@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import dev.avijit.orbithealth.OrbitApp
 import dev.avijit.orbithealth.ble.BridgeRingTransport
+import dev.avijit.orbithealth.devtools.SampleDataSeeder
 import dev.avijit.orbithealth.ring.Sex
 import dev.avijit.orbithealth.ring.UserProfile
 import dev.avijit.orbithealth.sync.SyncService
@@ -24,9 +25,11 @@ import kotlinx.coroutines.withTimeout
  *   then restore the previous `useMacBridge`. The bridge forces COEXISTENCE and its link disallows
  *   clears, so this never deletes ring history.
  * - DEBUG_USE_BRIDGE (`--ez on true|false`): persistently select the bridge (e.g. for the service).
+ * - The bridge actions take `--es code XXXXXX`, the code `tools/ble_bridge.py --code` was started with; without it the
+ *   current code is kept, or a new one is made and logged.
  * - DEBUG_COUNTS: log row counts from the encrypted DB.
  * - DEBUG_START_SERVICE: start [SyncService] (the app must be in the foreground for an FGS start).
- * - DEBUG_SEED: write 35 days of sample data, a fake ring address and a recent sync time ([DebugSeeder]) so the app
+ * - DEBUG_SEED: write 35 days of sample data, a fake ring address and a recent sync time ([SampleDataSeeder]) so the app
  *   opens on Today with realistic numbers. Emulator/screenshot use only. `--ez lock false` also turns the app lock
  *   off, so screenshots are not blanked by the (secure) biometric prompt. `--ez data false` only marks a ring as
  *   paired (no samples), so a bridge DEBUG_SYNC shows the real ring's data alone.
@@ -38,21 +41,35 @@ import kotlinx.coroutines.withTimeout
 class DebugBridgeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            ACTION_HANDSHAKE -> handshake()
-            ACTION_SYNC -> sync(context)
+            ACTION_HANDSHAKE -> handshake(context, intent)
+            ACTION_SYNC -> { code(graph(context), intent); sync(context) }
             ACTION_COUNTS -> counts(context)
             ACTION_START_SERVICE -> SyncService.start(context)
-            ACTION_USE_BRIDGE -> useBridge(context, intent.getBooleanExtra("on", false))
+            ACTION_USE_BRIDGE -> {
+                if (intent.getBooleanExtra("on", false)) code(graph(context), intent) else graph(context).bridgeCode.value = null
+                useBridge(context, intent.getBooleanExtra("on", false))
+            }
             ACTION_SEED -> seed(context, intent.takeIf { it.hasExtra("lock") }?.getBooleanExtra("lock", true), intent.getBooleanExtra("data", true))
             ACTION_RESET -> reset(context)
             ACTION_PAIR -> pair(context, intent.getStringExtra("uri"), intent.getStringExtra("scopes"))
         }
     }
 
-    private fun handshake() {
+    private fun graph(context: Context) = (context.applicationContext as OrbitApp).graph
+
+    /** The bridge code: `--es code XXXXXX` (must match `ble_bridge.py --code`), else the current one, else a new one (logged). */
+    private fun code(graph: dev.avijit.orbithealth.AppGraph, intent: Intent): String {
+        intent.getStringExtra("code")?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }?.let { graph.bridgeCode.value = it }
+        return graph.bridgeCode.value ?: dev.avijit.orbithealth.ble.BridgeCode.generate().also {
+            graph.bridgeCode.value = it
+            Log.i(TAG, "bridge code $it: run ble_bridge.py --code $it")
+        }
+    }
+
+    private fun handshake(context: Context, intent: Intent) {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
-            val transport = BridgeRingTransport("10.0.2.2", 7777)
+            val transport = BridgeRingTransport(code(graph(context), intent))
             try {
                 withTimeout(30_000) {
                     transport.connect()
@@ -124,9 +141,9 @@ class DebugBridgeReceiver : BroadcastReceiver() {
             try {
                 // `--ez data false`: only mark a ring as paired (past onboarding) with no sample data, so a bridge sync
                 // fills Today with the real ring's readings alone.
-                val n = if (data) DebugSeeder.seed(graph) else 0.also { graph.settings.setPairedRing(DebugSeeder.FAKE_RING) }
+                val n = if (data) SampleDataSeeder.seed(graph) else 0.also { graph.settings.setPairedRing(SampleDataSeeder.FAKE_RING) }
                 if (lock != null) graph.settings.setAppLockEnabled(lock)
-                Log.i(TAG, "DEBUG_SEED wrote $n samples + 1 sleep session; ring=${DebugSeeder.FAKE_RING_ADDRESS}")
+                Log.i(TAG, "DEBUG_SEED wrote $n samples + 1 sleep session; ring=${SampleDataSeeder.FAKE_RING_ADDRESS}")
                 logCounts(graph.repository.counts().toString())
             } catch (t: Throwable) {
                 Log.e(TAG, "DEBUG_SEED failed: $t", t)

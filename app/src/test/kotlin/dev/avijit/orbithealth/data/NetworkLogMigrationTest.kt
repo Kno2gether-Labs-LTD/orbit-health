@@ -59,7 +59,11 @@ class NetworkLogMigrationTest {
             assertEquals(1, db.sleepDao().sessionCount())
             db.networkLogDao().insert(NetworkLogEntity(atMs = 1, host = "h", purpose = "state", bytesUp = 10, bytesDown = 20, ok = true))
             assertEquals(30L, db.networkLogDao().bytesSince(0).first())
-            assertEquals(2, db.openHelper.readableDatabase.version)
+            // "Sent to your server" leaves out the app-update requests to GitHub.
+            db.networkLogDao().insert(NetworkLogEntity(atMs = 2, host = "api.github.com", purpose = "update_check", bytesUp = 300, bytesDown = 9000, ok = true))
+            assertEquals(10L, db.networkLogDao().bytesUpSince(0).first())
+            // Room runs every later step too (2 → 3: sleep_estimates).
+            assertEquals(3, db.openHelper.readableDatabase.version)
         } finally {
             db.close()
         }

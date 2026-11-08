@@ -100,6 +100,31 @@ fun GhostButton(
     }
 }
 
+/**
+ * A ghost button for the one irreversible choice on a sheet ("Delete everything"): the ghost pill in the attention
+ * tint (fill 10%, border 36%, label at full), never filled, so the calm warm "Cancel" above it stays the obvious tap.
+ */
+@Composable
+fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, tween(120), label = "press")
+    Row(
+        modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .height(48.dp)
+            .clip(PillShape)
+            .background(OrbitPalette.Attention.copy(alpha = 0.10f))
+            .border(1.dp, OrbitPalette.Attention.copy(alpha = 0.36f), PillShape)
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = OrbitTypography.ButtonGhost.copy(color = OrbitPalette.Attention), maxLines = 1)
+    }
+}
+
 /** Two ghost buttons side by side ("Try again" / "Open settings"). */
 @Composable
 fun GhostButtonPair(first: String, onFirst: () -> Unit, second: String, onSecond: () -> Unit, modifier: Modifier = Modifier) {
