@@ -43,7 +43,7 @@ Cheap smart rings are good hardware held back by their apps. The one that ships 
 - No analytics, ads or tracking SDKs, and no account or sign-in.
 - Data lives in an encrypted on-phone database and is excluded from Android backups.
 - An optional app lock (fingerprint, face or PIN).
-- **Open export** of all your data.
+- **Export** of all your data is coming in the next update; until then, a paired Orbit Server can export everything as JSON.
 - **Updates from GitHub** (new in 0.7): the app checks this repository's releases at most once a day (you can turn that off in Me → App updates), verifies the download is signed with the same key, and installs it with your approval. Each check is listed in the app's network log.
 
 **Your own server and AI, if you want them**

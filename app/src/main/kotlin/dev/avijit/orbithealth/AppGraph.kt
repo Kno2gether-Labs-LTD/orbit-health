@@ -65,7 +65,11 @@ class AppGraph(context: Context, transportOverride: TransportProvider? = null) {
      * stored. Without it the bridge is never used (see [AppTransportProvider]).
      */
     val bridgeCode = MutableStateFlow<String?>(null)
-    private val transports: TransportProvider = transportOverride ?: AppTransportProvider { bridgeCode.value }
+    private val transports: TransportProvider = transportOverride ?: AppTransportProvider(
+        bridgeCode = { bridgeCode.value },
+        // A failed handshake spent this code (its proof could be guessed from offline): show a new one.
+        retireCode = { spent -> if (bridgeCode.compareAndSet(spent, BridgeCode.generate())) Log.i("OrbitBridge", "Mac bridge handshake failed: new code shown in Developer options") },
+    )
 
     /**
      * Every ring family this build supports. To add a ring: add its module (implementing RingFamily), append its

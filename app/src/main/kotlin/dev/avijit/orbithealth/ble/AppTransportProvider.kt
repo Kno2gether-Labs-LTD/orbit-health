@@ -16,7 +16,7 @@ import java.security.SecureRandom
  * always speaks YCBT, whatever ring is stored, and its link never allows clears. See [BridgeRingTransport] for the
  * loopback-only rule and the code handshake.
  */
-class AppTransportProvider(private val bridgeCode: () -> String?) : TransportProvider {
+class AppTransportProvider(private val retireCode: (String) -> Unit = {}, private val bridgeCode: () -> String?) : TransportProvider {
     override fun kindFor(settings: SettingsSnapshot) =
         if (settings.useMacBridge && bridgeCode() != null) TransportKind.DEBUG_BRIDGE else TransportKind.BLE
 
@@ -25,7 +25,7 @@ class AppTransportProvider(private val bridgeCode: () -> String?) : TransportPro
             TransportKind.BLE -> connectBle(context, settings, registry)
             TransportKind.DEBUG_BRIDGE -> {
                 val code = bridgeCode() ?: throw IOException("Turn Use Mac bridge on again to get a code")
-                val transport = BridgeRingTransport(code)
+                val transport = BridgeRingTransport(code, onProofSpent = { retireCode(code) })
                 transport.connect()
                 RingConnection(YcbtFamily.createDriver(transport), transport.connected, allowsClear = false, onClose = transport::close)
             }

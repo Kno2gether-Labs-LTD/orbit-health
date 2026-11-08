@@ -52,6 +52,11 @@ class BridgeRingTransport(
     private val host: String = hostFor(isEmulator()),
     private val port: Int = PORT,
     emulator: Boolean = isEmulator(),
+    /**
+     * Called when a handshake fails after the app sent its proof. Whoever got that proof could try to guess the code
+     * from it offline, so the caller must retire the code (a fresh one is shown; the bridge is restarted with it).
+     */
+    private val onProofSpent: () -> Unit = {},
 ) : RingTransport {
     init {
         require(host in LOOPBACK || (emulator && host == EMULATOR_HOST_LOOPBACK)) {
@@ -110,12 +115,12 @@ class BridgeRingTransport(
             write(byteArrayOf((answer.size shr 8).toByte(), answer.size.toByte()) + answer)
             flush()
         }
-        val reply = frame()
+        val reply = try { frame() } catch (e: IOException) { onProofSpent(); throw e }
         s.soTimeout = 0
         val expected = bridgeProof(code, nonceC, nonceB)
         val ok = reply.size == 1 + expected.size && (reply[0].toInt() and 0xFF) == PROOF_TAG &&
             MessageDigest.isEqual(expected, reply.copyOfRange(1, reply.size))
-        if (!ok) throw IOException(IMPOSTOR)
+        if (!ok) { onProofSpent(); throw IOException(IMPOSTOR) }
     }
 
     private fun readLoop(din: DataInputStream) {

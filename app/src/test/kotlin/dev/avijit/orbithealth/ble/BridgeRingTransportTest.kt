@@ -74,12 +74,15 @@ class BridgeRingTransportTest {
     @Test
     fun aWrongCodeIsRefused() = runBlocking {
         ServerSocket(0).use { server ->
-            val transport = BridgeRingTransport(CODE, "127.0.0.1", server.localPort, emulator = false)
+            var spent = 0
+            val transport = BridgeRingTransport(CODE, "127.0.0.1", server.localPort, emulator = false, onProofSpent = { spent++ })
             val peer = async(kotlinx.coroutines.Dispatchers.IO) {
                 server.accept().also { s -> answerHello(s, "ZZZZZ-ZZZZZ", appMustProve = false) }
             }
             assertTrue(runCatching { transport.connect() }.exceptionOrNull() is java.io.IOException)
             assertFalse(transport.connected.value)
+            // The app's proof went to a peer that couldn't prove the code: that code must be retired.
+            assertEquals(1, spent)
             peer.await().close()
         }
     }
