@@ -61,7 +61,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // QR scanning for pairing (Agent & sync). The camera is only asked for when the user taps Scan.
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
-    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
@@ -74,16 +74,16 @@ dependencies {
     // App lock: BiometricPrompt (needs a FragmentActivity; fragment pinned past 1.3 for the Activity Result APIs)
     // and ProcessLifecycleOwner to time how long the app has been in the background.
     implementation("androidx.biometric:biometric:1.1.0")
-    implementation("androidx.fragment:fragment-ktx:1.8.5")
+    implementation("androidx.fragment:fragment-ktx:1.9.1")
     implementation("androidx.lifecycle:lifecycle-process:2.8.5")
     // 2.8.x is the line built on Compose 1.7 (BOM 2024.10.01); also brings lifecycle-viewmodel-compose.
-    implementation("androidx.navigation:navigation-compose:2.8.4")
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    ksp("androidx.room:room-compiler:2.8.5")
     implementation("net.zetetic:sqlcipher-android:4.6.1@aar")
     implementation("androidx.sqlite:sqlite:2.4.0")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.datastore:datastore-preferences:1.3.0")
     testImplementation("org.robolectric:robolectric:4.13")
     // Compose UI tests on Robolectric (the lock overlay's focus/touch blocking).
     testImplementation(platform("androidx.compose:compose-bom:2024.10.01"))
