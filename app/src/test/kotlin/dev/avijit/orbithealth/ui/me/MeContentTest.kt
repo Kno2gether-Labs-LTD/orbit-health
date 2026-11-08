@@ -84,16 +84,72 @@ class MeContentTest {
     }
 
     private class FakeTools(on: Boolean = false) : DeveloperTools {
+        var seeds = 0
+        var resets = 0
         override val useMacBridge = kotlinx.coroutines.flow.MutableStateFlow(on)
         override suspend fun setUseMacBridge(on: Boolean) { useMacBridge.value = on }
-        override suspend fun seedSampleData() = "ok"
-        override suspend fun reset() = Unit
+        override suspend fun seedSampleData(): String { seeds++; return "ok" }
+        override suspend fun reset() { resets++ }
     }
+
+    private var afterReset = 0
 
     private fun showWithTools(tools: DeveloperTools, revealed: Boolean = false) = rule.setContent {
         CompositionLocalProvider(LocalSkyForceFallback provides true) {
-            MeContent(loaded, MeActions(), developer = tools, developerRevealed = revealed)
+            MeContent(loaded, MeActions(), developer = tools, developerRevealed = revealed, onReset = { afterReset++ })
         }
+    }
+
+    @Test fun resetDoesNothingUntilConfirmed() {
+        val tools = FakeTools()
+        showWithTools(tools, revealed = true)
+        rule.onNodeWithText("Reset").performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText(DeveloperCopy.RESET_TITLE).assertExists()
+        rule.onNodeWithText(DeveloperCopy.RESET_BODY).assertExists()
+        assertEquals(0, tools.resets)
+        assertEquals(0, afterReset)
+    }
+
+    @Test fun cancellingResetKeepsEverything() {
+        val tools = FakeTools()
+        showWithTools(tools, revealed = true)
+        rule.onNodeWithText("Reset").performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Cancel").performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onAllNodesWithText(DeveloperCopy.RESET_TITLE).assertCountEquals(0)
+        assertEquals(0, tools.resets)
+        assertEquals(0, afterReset)
+    }
+
+    @Test fun confirmingResetDeletesOnce() {
+        val tools = FakeTools()
+        showWithTools(tools, revealed = true)
+        rule.onNodeWithText("Reset").performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText(DeveloperCopy.RESET_CONFIRM).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        assertEquals(1, tools.resets)
+        assertEquals(1, afterReset)
+        rule.onAllNodesWithText(DeveloperCopy.RESET_TITLE).assertCountEquals(0)
+    }
+
+    @Test fun seedAsksFirst() {
+        val tools = FakeTools()
+        showWithTools(tools, revealed = true)
+        rule.onNodeWithText("Seed sample data").performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText(DeveloperCopy.SEED_TITLE).assertExists()
+        assertEquals(0, tools.seeds)
+        rule.onNodeWithText("Cancel").performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        assertEquals(0, tools.seeds)
+        rule.onNodeWithText("Seed sample data").performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText(DeveloperCopy.SEED_CONFIRM).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        assertEquals(1, tools.seeds)
     }
 
     @Test fun developerOptionsStayHiddenUntilShaken() {

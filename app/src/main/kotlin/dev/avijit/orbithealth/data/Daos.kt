@@ -103,8 +103,8 @@ interface NetworkLogDao {
     @Query("SELECT COALESCE(SUM(bytesUp + bytesDown), 0) FROM network_log WHERE atMs >= :fromMs")
     fun bytesSince(fromMs: Long): Flow<Long>
 
-    /** Bytes sent (up only) since [fromMs]. */
-    @Query("SELECT COALESCE(SUM(bytesUp), 0) FROM network_log WHERE atMs >= :fromMs")
+    /** Bytes sent (up only) to the user's server since [fromMs]; app-update requests to GitHub are not counted. */
+    @Query("SELECT COALESCE(SUM(bytesUp), 0) FROM network_log WHERE atMs >= :fromMs AND purpose NOT LIKE 'update%'")
     fun bytesUpSince(fromMs: Long): Flow<Long>
 
     @Query("DELETE FROM network_log WHERE atMs < :beforeMs")
@@ -112,3 +112,49 @@ interface NetworkLogDao {
 }
 
 data class MetricCount(val metric: String, val count: Int)
+
+@Dao
+interface SleepEstimateDao {
+    @Insert
+    suspend fun insert(e: SleepEstimateEntity): Long
+
+    /** Refreshes a suggestion with a newer detection; decided estimates are never touched. */
+    @Query(
+        "UPDATE sleep_estimates SET kind = :kind, startMs = :startMs, endMs = :endMs, detectedStartMs = :startMs, " +
+            "detectedEndMs = :endMs, lowestHr = :lowestHr, lowestSpo2 = :lowestSpo2, confidence = :confidence " +
+            "WHERE id = :id AND status = 'SUGGESTED'",
+    )
+    suspend fun refreshSuggestion(id: Long, kind: String, startMs: Long, endMs: Long, lowestHr: Int?, lowestSpo2: Int?, confidence: Double)
+
+    @Query("DELETE FROM sleep_estimates WHERE id IN (:ids) AND status = 'SUGGESTED'")
+    suspend fun deleteSuggestions(ids: List<Long>)
+
+    /** Keeps a suggestion, with the user's times. Returns rows changed (0 when it was already decided or is gone). */
+    @Query(
+        "UPDATE sleep_estimates SET status = 'CONFIRMED', startMs = :startMs, endMs = :endMs, decidedAtMs = :atMs " +
+            "WHERE id = :id AND status = 'SUGGESTED'",
+    )
+    suspend fun confirm(id: Long, startMs: Long, endMs: Long, atMs: Long): Int
+
+    /** Turns a suggestion down for good. Returns rows changed. */
+    @Query("UPDATE sleep_estimates SET status = 'DISMISSED', decidedAtMs = :atMs WHERE id = :id AND status = 'SUGGESTED'")
+    suspend fun dismiss(id: Long, atMs: Long): Int
+
+    /** Estimates ending in [fromMs]..[toMs], oldest first. */
+    @Query("SELECT * FROM sleep_estimates WHERE endMs BETWEEN :fromMs AND :toMs ORDER BY startMs")
+    fun between(fromMs: Long, toMs: Long): Flow<List<SleepEstimateEntity>>
+
+    /** Estimates whose time overlaps [fromMs]..[toMs] (the detector's window), any status. */
+    @Query("SELECT * FROM sleep_estimates WHERE endMs >= :fromMs AND startMs <= :toMs ORDER BY startMs")
+    suspend fun overlapping(fromMs: Long, toMs: Long): List<SleepEstimateEntity>
+
+    /** Every answered estimate in the order the user answered (the tuning's memory). */
+    @Query("SELECT * FROM sleep_estimates WHERE status != 'SUGGESTED' ORDER BY decidedAtMs, id")
+    suspend fun decided(): List<SleepEstimateEntity>
+
+    @Query("SELECT * FROM sleep_estimates WHERE id = :id")
+    suspend fun byId(id: Long): SleepEstimateEntity?
+
+    @Query("SELECT COUNT(*) FROM sleep_estimates")
+    suspend fun count(): Int
+}

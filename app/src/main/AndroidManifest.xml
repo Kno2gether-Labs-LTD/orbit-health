@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Privacy-first: the only network use is HTTPS to the user's own paired Orbit Server, pinned to its certificate
-         (server/PinnedTls). No analytics, ads or crash reporting. Cleartext is refused (network_security_config). -->
+    <!-- Privacy-first: network use is HTTPS to the user's own paired Orbit Server, pinned to its certificate
+         (server/PinnedTls), and the app-update check against GitHub Releases (update/GitHubUpdateSource; sends only the
+         app version, can be turned off). No analytics, ads or crash reporting. Cleartext is refused
+         (network_security_config). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <uses-permission
@@ -14,6 +16,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Restart ring sync after a reboot (BootReceiver). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- In-app updates: hands a verified release APK to the system installer, which still asks the user to confirm. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Coexistence: detect the vendor SmartHealth app (we never clear ring history while it is installed). -->
     <queries>
@@ -42,6 +46,10 @@
             android:name=".sync.SyncService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+        <!-- The installer session's result; not exported, so only our own PendingIntent (filled by the system) reaches it. -->
+        <receiver
+            android:name=".update.InstallStatusReceiver"
+            android:exported="false" />
         <receiver
             android:name=".sync.BootReceiver"
             android:exported="true">

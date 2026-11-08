@@ -70,11 +70,12 @@ import dev.avijit.orbithealth.ui.theme.lineBox
 import dev.chrisbanes.haze.hazeSource
 import java.text.NumberFormat
 import kotlinx.coroutines.launch
+import dev.avijit.orbithealth.update.UpdateUiState
 
 private val Gutter = 24.dp
 
 /** Which sheet is open on Me. */
-enum class MeSheet { NAME, STEP_GOAL, SLEEP_GOAL, BEDTIME, PROFILE, DATA_PRIVACY }
+enum class MeSheet { NAME, STEP_GOAL, SLEEP_GOAL, BEDTIME, PROFILE, DATA_PRIVACY, APP_UPDATES }
 
 /** Everything the Me layout can do, so [MeContent] can be previewed and screenshotted without a ViewModel. */
 class MeActions(
@@ -97,8 +98,10 @@ fun MeScreen(
     onAgentSync: () -> Unit,
     onReset: () -> Unit,
     onAutomaticChecks: () -> Unit = {},
+    updates: dev.avijit.orbithealth.update.UpdateManager? = null,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val updateState = updates?.state?.collectAsStateWithLifecycle()?.value
     val scope = rememberCoroutineScope()
     // The activity's biometric/PIN check; absent (previews) means turning the lock off is refused.
     val authenticator = LocalLockAuthenticator.current
@@ -117,6 +120,15 @@ fun MeScreen(
         ),
         developer = developer,
         onReset = onReset,
+        updates = updateState,
+        updateActions = remember(updates) {
+            updates?.let { u ->
+                UpdateActions(
+                    check = { u.checkNow() }, update = { u.update() },
+                    setAutoCheck = u::setAutoCheck, openInstallPermission = u::openInstallPermission,
+                )
+            } ?: UpdateActions()
+        },
     )
 }
 
@@ -134,9 +146,12 @@ fun MeContent(
     onReset: () -> Unit = {},
     initialSheet: MeSheet? = null,
     developerRevealed: Boolean = false,
+    updates: UpdateUiState? = null,
+    updateActions: UpdateActions = UpdateActions(),
+    now: () -> java.time.Instant = { java.time.Instant.now() },
 ) {
     var sheet by rememberSaveable { mutableStateOf(initialSheet) }
-    // Developer options (debug builds only) stay hidden until the phone is shaken on Me, and stay visible while the
+    // Developer options (any build) stay hidden until the phone is shaken on Me, and stay visible while the
     // Mac bridge is on so it can always be turned off again.
     var revealed by rememberSaveable { mutableStateOf(developerRevealed) }
     val bridgeOn by remember(developer) { developer?.useMacBridge ?: flowOf(false) }.collectAsState(initial = false)
@@ -226,6 +241,13 @@ fun MeContent(
                     leading = { Symbol(OrbitSymbol.Doc, size = 20.dp, tint = OrbitPalette.Good) },
                     onClick = actions.openLicences,
                 )
+                updates?.let { u ->
+                    ListRow(
+                        UpdateCopy.ROW, first = false, chevron = true, value = u.currentVersion,
+                        caption = UpdateCopy.status(u),
+                        leading = { Symbol(OrbitSymbol.Down, size = 20.dp, tint = OrbitPalette.SleepB) },
+                    ) { sheet = MeSheet.APP_UPDATES }
+                }
             }
 
             if (developer != null && (revealed || bridgeOn)) DeveloperGroup(developer, onReset, Modifier.livingEnter(360))
@@ -236,6 +258,7 @@ fun MeContent(
     when (sheet) {
         null -> Unit
         MeSheet.DATA_PRIVACY -> DataPrivacySheet(state.sentThisMonth) { sheet = null }
+        MeSheet.APP_UPDATES -> updates?.let { AppUpdatesSheet(it, updateActions, now()) { sheet = null } } ?: run { sheet = null }
         else -> EditSheet(sheet!!, state, actions) { sheet = null }
     }
 }
@@ -285,24 +308,29 @@ private fun RingCard(state: MeUiState, modifier: Modifier) {
     }
 }
 
-/** Debug builds only, after a shake on Me: the Mac bridge switch and sample data. */
+/** After a shake on Me (any build): the Mac bridge switch and sample data, each data change confirmed first. */
 @Composable
 private fun DeveloperGroup(tools: DeveloperTools, onReset: () -> Unit, modifier: Modifier) {
     val scope = rememberCoroutineScope()
     val bridge by remember(tools) { tools.useMacBridge }.collectAsState(initial = false)
+    val code by remember(tools) { tools.bridgeCode }.collectAsState(initial = null)
     var note by remember { mutableStateOf<String?>(null) }
+    // Seed and Reset both change real data: each waits for a yes on its own sheet.
+    var confirm by rememberSaveable { mutableStateOf<DeveloperConfirm?>(null) }
     Column(modifier) {
         ListGroupLabel("Developer")
         ListCard(Modifier.padding(horizontal = Gutter)) {
             ListRow(
                 "Use Mac bridge", first = true, onClick = { scope.launch { tools.setUseMacBridge(!bridge) } },
+                // The code proves to the app that it is talking to the real bridge, not another app on this phone.
+                caption = code?.takeIf { bridge }?.let { DeveloperCopy.bridgeCode(it) },
                 trailing = { OrbitToggle(bridge, onCheckedChange = { on -> scope.launch { tools.setUseMacBridge(on) } }) },
             )
             GhostButtonPair(
                 first = "Seed sample data",
-                onFirst = { scope.launch { note = "Seeding…"; note = runCatching { tools.seedSampleData() }.getOrElse { "Seeding failed: ${it.message}" } } },
+                onFirst = { confirm = DeveloperConfirm.SEED },
                 second = "Reset",
-                onSecond = { scope.launch { runCatching { tools.reset() }.onSuccess { onReset() }.onFailure { note = "Reset failed: ${it.message}" } } },
+                onSecond = { confirm = DeveloperConfirm.RESET },
                 modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
             )
             note?.let { Text(it, style = OrbitTypography.Meta, modifier = Modifier.padding(bottom = 14.dp)) }
@@ -312,5 +340,19 @@ private fun DeveloperGroup(tools: DeveloperTools, onReset: () -> Unit, modifier:
             )
         }
         Spacer(Modifier.width(1.dp))
+    }
+    confirm?.let { which ->
+        DeveloperConfirmSheet(which, onDismiss = { confirm = null }, onConfirm = {
+            confirm = null
+            when (which) {
+                DeveloperConfirm.SEED -> scope.launch {
+                    note = "Seeding…"
+                    note = runCatching { tools.seedSampleData() }.getOrElse { "Seeding failed: ${it.message}" }
+                }
+                DeveloperConfirm.RESET -> scope.launch {
+                    runCatching { tools.reset() }.onSuccess { onReset() }.onFailure { note = "Reset failed: ${it.message}" }
+                }
+            }
+        })
     }
 }

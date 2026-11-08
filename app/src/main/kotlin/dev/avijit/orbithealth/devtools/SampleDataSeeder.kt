@@ -1,4 +1,4 @@
-package dev.avijit.orbithealth.debug
+package dev.avijit.orbithealth.devtools
 
 import dev.avijit.orbithealth.AppGraph
 import dev.avijit.orbithealth.prefs.PairedRing
@@ -25,7 +25,7 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Debug only: fills the (throwaway, emulator) database with 35 days of believable data so screens can be checked
+ * Developer tools only (shake on Me, then confirm): fills the database with 35 days of believable data so screens can be checked
  * against the mockups without a ring. Written as ring history so every rule (e.g. resting HR from sleep) applies.
  *
  * - Heart rate every 10 min (sleeping ~55–60, daytime ~68–85), HRV hourly overnight, SpO₂ every 30 min overnight,
@@ -38,9 +38,9 @@ import kotlin.random.Random
  *   2 minutes ago and the name "Sam" for the greeting (unless one is set). Today's steps total 914, as in the mockup.
  *
  * Nothing is dated after "now". Re-seeding is harmless (rows are de-duplicated by metric and time).
- * Undo with DEBUG_RESET, which wipes the database and all settings.
+ * Undo with Reset in the Developer group (or DEBUG_RESET in debug builds), which wipes the database and all settings.
  */
-object DebugSeeder {
+object SampleDataSeeder {
     /** Locally administered (bit 1 of the first octet), so it can never be a real ring's address. */
     const val FAKE_RING_ADDRESS = "02:00:5E:ED:00:01"
     private const val DAYS = 35

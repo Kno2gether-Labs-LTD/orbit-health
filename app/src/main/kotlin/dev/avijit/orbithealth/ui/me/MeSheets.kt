@@ -46,7 +46,8 @@ import java.text.NumberFormat
 /** Title of the sheet behind Me's door to Plan 2. */
 const val ComingSoonTitle = "Coming in the next update"
 const val DataPrivacySoon = "Health Connect, open exports and a live list of every connection your data makes, all in one place. " +
-    "Orbit Health only goes online to talk to your own Orbit Server, and only once you pair one. " +
+    "Orbit Health only goes online to talk to your own Orbit Server, once you pair one, and to ask GitHub whether " +
+    "a new version is out (App updates; you can turn that off). " +
     dev.avijit.orbithealth.ui.agent.AgentSyncCopy.ZONE_NOTE
 
 private val StepGoals = 2_000..30_000

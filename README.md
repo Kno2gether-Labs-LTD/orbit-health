@@ -29,6 +29,9 @@ Cheap smart rings are good hardware held back by their apps. The one that ships 
 - **Readiness** that learns your baseline over your first three nights.
 - **Heart rate, HRV, SpO₂, stress and steps**, with day and week views and long-term trends.
 
+**Sleep the ring missed** (new in 0.7)
+- When the ring didn't record a night (or a nap), Orbit Health estimates it from your heart rate and movement and **asks you to confirm or adjust** it. Confirmed estimates fill the gap and are always marked as estimates.
+
 **Measure now**
 - On-demand readings of **heart rate, SpO₂, HRV, stress and blood pressure**, with a live value while the ring measures.
 - Blood pressure and stress are **estimates** from the ring's optical sensor, and always labelled ESTIMATE.
@@ -41,9 +44,10 @@ Cheap smart rings are good hardware held back by their apps. The one that ships 
 - Data lives in an encrypted on-phone database and is excluded from Android backups.
 - An optional app lock (fingerprint, face or PIN).
 - **Open export** of all your data.
+- **Updates from GitHub** (new in 0.7): the app checks this repository's releases at most once a day (you can turn that off in Me → App updates), verifies the download is signed with the same key, and installs it with your approval. Each check is listed in the app's network log.
 
 **Your own server and AI, if you want them**
-- **[Orbit Server](docs/server.md)** is a small self-hosted companion. Pair your phone and it pushes your data to *your* server over HTTPS with a pinned certificate.
+- **[Orbit Server](https://github.com/Kno2gether-Labs-LTD/orbit-server)** is a small self-hosted companion, now its own project (it also powers the OrbitWalker voice agent). Pair your phone and it pushes your data to *your* server over HTTPS with a pinned certificate. This repository keeps a copy of the server for building everything together; new server features land in [orbit-server](https://github.com/Kno2gether-Labs-LTD/orbit-server) first. Guides: [orbitapps.space/docs](https://orbitapps.space/docs/).
 - From there you get a private dashboard and an **MCP endpoint**, so AI agents you run can read your health data under scopes you set, with every access logged in the app.
 
 ## Supported rings

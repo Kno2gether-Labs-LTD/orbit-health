@@ -9,6 +9,9 @@ import dev.avijit.orbithealth.insights.Goal
 import dev.avijit.orbithealth.insights.RestingHr
 import dev.avijit.orbithealth.insights.Score
 import dev.avijit.orbithealth.insights.Scores
+import dev.avijit.orbithealth.insights.SleepEstimate
+import dev.avijit.orbithealth.insights.SleepEstimates
+import dev.avijit.orbithealth.insights.SleepKind
 import dev.avijit.orbithealth.insights.SmartGoals
 import dev.avijit.orbithealth.prefs.SettingsSnapshot
 import dev.avijit.orbithealth.ring.Metric
@@ -18,6 +21,9 @@ import dev.avijit.orbithealth.ring.SleepStage
 import dev.avijit.orbithealth.ring.totalSleepSec
 import dev.avijit.orbithealth.sync.SyncState
 import dev.avijit.orbithealth.ui.charts.ChartMath
+import dev.avijit.orbithealth.ui.sleep.EstimateAnswer
+import dev.avijit.orbithealth.ui.sleep.EstimateCopy
+import dev.avijit.orbithealth.ui.sleep.EstimateSuggestion
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -68,6 +74,12 @@ class TodayDeps(
     val compute: CoroutineDispatcher = Dispatchers.Default,
     /** The installed vendor app's name (e.g. "SmartHealth"), or null when unknown; names the coexistence banner. */
     val vendorAppName: Flow<String?> = flowOf(null),
+    /** Estimated sleep (any status) ending in the range. */
+    val estimates: (Instant, Instant) -> Flow<List<SleepEstimate>> = { _, _ -> flowOf(emptyList()) },
+    /** Stores the user's answer to a suggestion. */
+    val answerEstimate: suspend (EstimateAnswer) -> Unit = {},
+    /** Looks for sleep the ring missed (idempotent); run when Today opens. */
+    val detectEstimates: suspend () -> Unit = {},
 )
 
 fun minuteTicks(clock: Clock): Flow<Instant> = flow {
@@ -137,8 +149,14 @@ data class TodayUiState(
     /** Minute of the local day, for the stress ribbon's "now". */
     val nowMinute: Int = 0,
     val restingHr: Int? = null,
-    /** Last night's main sleep, for the Sleep hero's strip and times. */
+    /** Last night's main sleep, for the Sleep hero's strip and times (a confirmed estimate has no segments). */
     val lastNight: SleepSession? = null,
+    /** [lastNight] is a confirmed estimate: no stage strip, labelled as estimated. */
+    val lastNightEstimated: Boolean = false,
+    /** A night the ring missed, waiting for Yes / Adjust / No. */
+    val nightSuggestion: EstimateSuggestion? = null,
+    /** A nap waiting for Yes / No. */
+    val napSuggestion: EstimateSuggestion? = null,
     /** Last night had the most deep sleep of the last seven (with at least three earlier nights to compare). */
     val deepestNight: Boolean = false,
     val stepBase: Int = 0,
@@ -181,6 +199,9 @@ internal data class DayResult(
     val lastNight: SleepSession?,
     val deepestNight: Boolean,
     val distanceM: Int,
+    val lastNightEstimated: Boolean = false,
+    val nightSuggestion: SleepEstimate? = null,
+    val napSuggestion: SleepEstimate? = null,
     val kcal: Int,
     val stepBase: Int,
     val copy: DayCopy,
@@ -218,6 +239,7 @@ internal class DayInput(
     val goals: GoalSettings,
     val distance: List<Sample> = emptyList(),
     val kcal: List<Sample> = emptyList(),
+    val estimates: List<SleepEstimate> = emptyList(),
 )
 
 object TodayMath {
@@ -300,7 +322,7 @@ object TodayMath {
             val d = input.day.minusDays(i)
             val ds = start(d)
             val de = start(d.plusDays(1))
-            val rhr = RestingHr.of(input.hr, RestingHr.mainSleep(input.sessions, ds, de), ds, de)
+            val rhr = RestingHr.of(input.hr, nightOf(input, ds, de), ds, de)
             val hrv = dailyMean(input.hrv, ds, de)
             if (rhr != null) rhrValues += rhr
             if (hrv != null) hrvValues += hrv
@@ -310,9 +332,13 @@ object TodayMath {
         val hrvBase: Baseline? = Baselines.of(hrvValues)
 
         val mainSleep = RestingHr.mainSleep(input.sessions, todayStart, todayEnd)
-        val restingToday = RestingHr.of(input.hr, mainSleep, todayStart, todayEnd)
+        // The ring's night always wins; a confirmed estimate stands in only when the ring has none.
+        val estimated = if (mainSleep == null) SleepEstimates.confirmedNight(input.estimates, input.sessions, todayStart, todayEnd) else null
+        val night = mainSleep ?: estimated?.asSession()
+        val restingToday = RestingHr.of(input.hr, night, todayStart, todayEnd)
         val hrvToday = dailyMean(input.hrv, todayStart, todayEnd)
-        val sleep = Scores.sleep(mainSleep, input.goals.sleepGoalMin)
+        val sleep = if (estimated != null) SleepEstimates.score(estimated, input.goals.sleepGoalMin)
+        else Scores.sleep(mainSleep, input.goals.sleepGoalMin)
         val readiness = Scores.readiness(restingToday, hrBase, hrvToday, hrvBase, sleep)
 
         val stress = input.stress.filter { it.time >= todayStart && it.time < todayEnd }.sortedBy { it.time }
@@ -333,7 +359,7 @@ object TodayMath {
         } else null
         val spo2 = input.spo2.map { it.value }.takeIf { it.isNotEmpty() }?.average()
 
-        val lastNightSec = mainSleep?.totalSleepSec?.takeIf { it > 0 }
+        val lastNightSec = estimated?.durationSec ?: mainSleep?.totalSleepSec?.takeIf { it > 0 }
         // "Deepest" is deep-stage time, not total sleep: a long light night is not a deep one. Every earlier night with
         // sleep counts (one without any deep stage compares as 0).
         val earlierDeep = (1 until WEEK_NIGHTS).mapNotNull { i ->
@@ -348,16 +374,19 @@ object TodayMath {
         val r = readiness?.value
         val totals = mainSleep?.let { ChartMath.stageTotals(it) }.orEmpty()
         val copy = DayCopy(
-            daySentence = TodayCopy.daySentence(lastNightSec, deepest, r, bothDays),
+            daySentence = TodayCopy.daySentence(lastNightSec, deepest, r, bothDays, estimated = estimated != null),
             readinessInsight = TodayCopy.readinessInsight(r, bothDays),
             readinessMeta = TodayCopy.readinessMeta(r, bothDays, rhr, hrvToday?.roundToInt(), hrvVsNormal),
             sleepInsight = TodayCopy.sleepInsight(lastNightSec, deepest, input.goals.sleepGoalMin, sleep?.value),
-            sleepMeta = if (mainSleep == null) "Wear your ring to bed and your night appears here."
-            else "Deep ${TodayCopy.hm(totals[SleepStage.DEEP] ?: 0)} · REM ${TodayCopy.hm(totals[SleepStage.REM] ?: 0)}",
+            sleepMeta = when {
+                estimated != null -> EstimateCopy.NoStages
+                mainSleep == null -> "Wear your ring to bed and your night appears here."
+                else -> "Deep ${TodayCopy.hm(totals[SleepStage.DEEP] ?: 0)} · REM ${TodayCopy.hm(totals[SleepStage.REM] ?: 0)}"
+            },
             activityInsight = TodayCopy.activityInsight(steps, stepGoal.target),
             activityMeta = TodayCopy.activityMeta(distanceM, kcal),
             stepNote = TodayCopy.stepNote(input.goals.stepBase, stepGoal.target, r),
-            bedtimeNote = TodayCopy.bedtimeNote(mainSleep?.start?.atZone(zone)?.toLocalTime(), input.goals.bedtime),
+            bedtimeNote = TodayCopy.bedtimeNote(night?.start?.atZone(zone)?.toLocalTime(), input.goals.bedtime),
             hrvNote = TodayCopy.hrvNote(hrvToday, hrvVsNormal),
             spo2Note = TodayCopy.spo2Note(spo2),
             stressCaption = TodayCopy.stressCaption(stress, zone),
@@ -378,14 +407,22 @@ object TodayMath {
             baselineDays = bothDays,
             hrvVsNormal = hrvVsNormal,
             restingHr = rhr,
-            lastNight = mainSleep,
+            lastNight = night,
             deepestNight = deepest,
             distanceM = distanceM,
+            lastNightEstimated = estimated != null,
+            nightSuggestion = SleepEstimates.pendingNight(input.estimates, input.sessions, start(input.day.minusDays(1)), zone),
+            napSuggestion = SleepEstimates.pending(input.estimates, SleepKind.NAP, todayStart),
             kcal = kcal,
             stepBase = input.goals.stepBase,
             copy = copy,
         )
     }
+
+    /** The day's night: the ring's main sleep, else a confirmed estimate (as a session without stages). */
+    private fun nightOf(input: DayInput, from: Instant, to: Instant): SleepSession? =
+        RestingHr.mainSleep(input.sessions, from, to)
+            ?: SleepEstimates.confirmedNight(input.estimates, input.sessions, from, to)?.asSession()
 
     private fun dailyMean(samples: List<Sample>, from: Instant, to: Instant): Double? =
         samples.filter { it.time >= from && it.time < to }.map { it.value }.takeIf { it.isNotEmpty() }?.average()
@@ -439,8 +476,10 @@ class TodayViewModel(private val deps: TodayDeps, scope: CoroutineScope? = null)
             deps.samples(Metric.DISTANCE_M, dayStart, dayEnd),
             deps.samples(Metric.CALORIES_KCAL, dayStart, dayEnd),
         )
-        combine(combine(sources) { it.toList() }, deps.sleepSessions(historyFrom, dayEnd), goalSettings) { s, sessions, goals ->
-            DayInput(d, deps.zone, s[0], s[1], s[2], s[3], s[4], s[5], sessions, goals, distance = s[6], kcal = s[7])
+        combine(
+            combine(sources) { it.toList() }, deps.sleepSessions(historyFrom, dayEnd), goalSettings, deps.estimates(historyFrom, dayEnd),
+        ) { s, sessions, goals, estimates ->
+            DayInput(d, deps.zone, s[0], s[1], s[2], s[3], s[4], s[5], sessions, goals, distance = s[6], kcal = s[7], estimates = estimates)
         }
             // A sync writes many rows in quick succession: drop the inputs the compute could not keep up with.
             .conflate()
@@ -500,6 +539,9 @@ class TodayViewModel(private val deps: TodayDeps, scope: CoroutineScope? = null)
                 nowMinute = local.hour * 60 + local.minute,
                 restingHr = r.restingHr,
                 lastNight = r.lastNight,
+                lastNightEstimated = r.lastNightEstimated,
+                nightSuggestion = r.nightSuggestion?.let { EstimateCopy.suggestion(it, deps.zone) },
+                napSuggestion = r.napSuggestion?.let { EstimateCopy.suggestion(it, deps.zone) },
                 deepestNight = r.deepestNight,
                 stepBase = r.stepBase,
                 distanceM = r.distanceM,
@@ -521,8 +563,17 @@ class TodayViewModel(private val deps: TodayDeps, scope: CoroutineScope? = null)
             )
         }.stateIn(this.scope, SharingStarted.WhileSubscribed(5_000), TodayUiState())
 
+    init {
+        this.scope.launch { runCatching { deps.detectEstimates() } }
+    }
+
     fun dismissBanner() {
         scope.launch { deps.dismissBanner(deps.clock.instant()) }
+    }
+
+    /** The user's Yes / Adjust / No on a suggestion; the card leaves once the stored answer flows back. */
+    fun answer(a: EstimateAnswer) {
+        scope.launch { deps.answerEstimate(a) }
     }
 
     /** Pull-to-refresh: one sync; the indicator shows until it returns. Ignored while one is running. */

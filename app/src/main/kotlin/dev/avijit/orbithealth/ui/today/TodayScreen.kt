@@ -44,6 +44,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -83,6 +84,9 @@ import dev.avijit.orbithealth.ui.theme.OrbitPalette
 import dev.avijit.orbithealth.ui.theme.OrbitTypography
 import dev.avijit.orbithealth.ui.theme.lineBox
 import dev.avijit.orbithealth.ui.components.VendorAppCopy
+import dev.avijit.orbithealth.ui.sleep.EstimateAnswer
+import dev.avijit.orbithealth.ui.sleep.NapSuggestionCard
+import dev.avijit.orbithealth.ui.sleep.NightSuggestionCard
 import dev.chrisbanes.haze.hazeSource
 import java.text.NumberFormat
 import java.util.Locale
@@ -110,6 +114,7 @@ fun TodayScreen(vm: TodayViewModel, onOpen: (HeroMetric) -> Unit = {}, onMeasure
         },
         onOpen = onOpen,
         onMeasure = onMeasure,
+        onAnswerEstimate = vm::answer,
     )
 }
 
@@ -129,6 +134,8 @@ fun TodayContent(
     onOpen: (HeroMetric) -> Unit = {},
     /** Long-press on the Heart mini card: the Measure sheet on its picker. */
     onMeasure: () -> Unit = {},
+    /** Yes / Adjust / No on an estimated night or nap. */
+    onAnswerEstimate: (EstimateAnswer) -> Unit = {},
 ) {
     val pull = rememberPullToRefreshState()
     val scroll = rememberScrollState()
@@ -165,6 +172,17 @@ fun TodayContent(
                 })
                 AnimatedVisibility(state.showCoexistenceBanner, exit = fadeOut() + shrinkVertically()) {
                     CoexistenceBanner(state.vendorAppName, onUninstall, onDismissBanner, Modifier.padding(start = Gutter, end = Gutter, top = 20.dp))
+                }
+                // Sleep the ring missed: asked about above the hero, where last night's answer is wanted.
+                state.nightSuggestion?.let { s ->
+                    key(s.id) {
+                        NightSuggestionCard(s, onAnswerEstimate, Modifier.padding(start = Gutter, end = Gutter, top = 20.dp).livingEnter(90))
+                    }
+                }
+                state.napSuggestion?.let { s ->
+                    key(s.id) {
+                        NapSuggestionCard(s, onAnswerEstimate, Modifier.padding(start = Gutter, end = Gutter, top = 12.dp).livingEnter(100))
+                    }
                 }
                 HeroPager(
                     state, pager,

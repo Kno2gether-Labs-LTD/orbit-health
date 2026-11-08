@@ -10,9 +10,8 @@ import dev.avijit.orbithealth.sync.TransportKind
 import java.io.IOException
 
 /**
- * Picks and opens the ring transport. Main code only knows this interface; the implementation
- * (`BuildTransportProvider`) lives in the debug source set (BLE or Mac bridge) and the release source
- * set (BLE only), so release never references the bridge.
+ * Picks and opens the ring transport: [AppTransportProvider] in the app (BLE, or the loopback-only Mac bridge when the
+ * developer switch is on); fakes in tests.
  */
 interface TransportProvider {
     fun kindFor(settings: SettingsSnapshot): TransportKind

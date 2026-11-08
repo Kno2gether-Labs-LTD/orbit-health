@@ -53,6 +53,8 @@ class MeDeps(
     val sentSince: (fromMs: Long) -> Flow<Long> = { flowOf(0L) },
     /** The installed vendor app's name (e.g. "SmartHealth"), or null when unknown; names the coexistence caption. */
     val vendorAppName: Flow<String?> = flowOf(null),
+    /** True while the ring is reached through the Mac bridge (developer switch): the ring card says so. */
+    val bridgeActive: Flow<Boolean> = flowOf(false),
 )
 
 /** "Keep connected in background": driven by the sync mode, not a user switch, in Plan 1. */
@@ -86,6 +88,8 @@ data class MeUiState(
 object MeMath {
     const val DEFAULT_RING_NAME = "Your ring"
     const val AGENT_NOT_SET_UP = "Not set up"
+    /** Leads the ring card's status while the developer Mac bridge carries the ring's data. */
+    const val USING_BRIDGE = "Using Mac bridge"
 
     /** Start of [now]'s month in [zone], in epoch ms. */
     fun monthStartMs(now: Instant, zone: java.time.ZoneId): Long =
@@ -160,13 +164,15 @@ object MeMath {
 
     fun state(
         s: SettingsSnapshot, sync: SyncState, linked: Boolean, mode: SyncMode, now: Instant, vendorAppName: String? = null,
+        bridge: Boolean = false,
     ): MeUiState {
         val conn = connection(sync, linked, s.lastSyncedAt, now)
+        val status = s.ringFirmware?.let { "Firmware $it · $conn" } ?: conn.replaceFirstChar { it.uppercase() }
         return MeUiState(
             loaded = true,
             name = s.name,
             ringName = s.ringName?.takeIf { it.isNotBlank() } ?: DEFAULT_RING_NAME,
-            ringStatus = s.ringFirmware?.let { "Firmware $it · $conn" } ?: conn.replaceFirstChar { it.uppercase() },
+            ringStatus = if (bridge) "$USING_BRIDGE · $conn" else status,
             batteryPct = s.ringBatteryPct,
             lastSync = when {
                 sync is SyncState.Syncing || sync is SyncState.Connecting -> "Syncing…"
@@ -196,9 +202,10 @@ class MeViewModel(private val deps: MeDeps, scope: CoroutineScope? = null) : Vie
     val state: StateFlow<MeUiState> =
         combine(
             combine(
-                deps.settings, deps.syncState, deps.linked, combine(deps.mode, deps.vendorAppName) { m, v -> m to v }, deps.now,
-            ) { s, sync, linked, (mode, vendor), now ->
-                MeMath.state(s, sync, linked, mode, now, vendor)
+                deps.settings, deps.syncState, deps.linked,
+                combine(deps.mode, deps.vendorAppName, deps.bridgeActive) { m, v, b -> Triple(m, v, b) }, deps.now,
+            ) { s, sync, linked, (mode, vendor, bridge), now ->
+                MeMath.state(s, sync, linked, mode, now, vendor, bridge)
             },
             deps.serverName,
             // The month start follows the clock (each tick), so the count restarts on the 1st without a restart.
